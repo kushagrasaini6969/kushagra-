@@ -1,0 +1,428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Coilfield</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700&family=Unbounded:wght@600;800&display=swap">
+<style>
+/* Layout: full-bleed canvas arena, HUD pinned to the corners, one centered card for start and game over. */
+:root {
+  --ground: #070b14;
+  --arena: #111a2c;
+  --dot: #1c2941;
+  --edge: #ff5d73;
+  --ink: #e9eef9;
+  --ink-dim: #9aa7c2;
+  --accent: #ffc857;
+  --accent-ink: #1a1300;
+  --panel: rgba(12, 18, 31, 0.8);
+  --line: rgba(255, 255, 255, 0.12);
+  --font-display: "Unbounded", system-ui, sans-serif;
+  --font-body: "DM Sans", system-ui, sans-serif;
+  --font-mono: "DM Mono", ui-monospace, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; margin: 0; }
+body { background: var(--ground); color: var(--ink); font-family: var(--font-body); overflow: hidden; }
+#wrap { position: relative; width: 100%; height: 100%; overflow: hidden; touch-action: none; user-select: none; -webkit-user-select: none; cursor: crosshair; }
+#game { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+
+.hud { position: absolute; pointer-events: none; }
+#scorebox { top: 16px; left: max(16px, env(safe-area-inset-left, 0px)); }
+.eyebrow { font-size: 11px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-dim); }
+#score { font-family: var(--font-mono); font-weight: 500; font-size: 34px; line-height: 1.1; font-variant-numeric: tabular-nums; }
+#rank { font-family: var(--font-mono); font-size: 12px; color: var(--ink-dim); margin-top: 2px; }
+
+#boardbox { top: 16px; right: max(16px, env(safe-area-inset-right, 0px)); width: 168px; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; }
+#board { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 3px; }
+#board li { display: flex; justify-content: space-between; gap: 10px; font-size: 13px; }
+#board li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#board li span:last-child { font-family: var(--font-mono); font-size: 12px; font-variant-numeric: tabular-nums; color: var(--ink-dim); }
+#board li.me { color: var(--accent); }
+#board li.me span:last-child { color: var(--accent); }
+
+#mini { bottom: 16px; right: max(16px, env(safe-area-inset-right, 0px)); width: 92px; height: 92px; border-radius: 50%; background: var(--panel); border: 1px solid var(--line); }
+#hint { bottom: 16px; left: max(16px, env(safe-area-inset-left, 0px)); font-size: 12px; color: var(--ink-dim); max-width: 46%; }
+
+#boost { display: none; position: absolute; bottom: 24px; left: max(16px, env(safe-area-inset-left, 0px)); width: 76px; height: 76px; border-radius: 50%; border: 2px solid var(--accent); background: var(--panel); color: var(--accent); font: 700 12px var(--font-body); letter-spacing: 0.1em; align-items: center; justify-content: center; touch-action: none; }
+#boost:active { background: var(--accent); color: var(--accent-ink); }
+@media (pointer: coarse) { #boost { display: flex; } #hint { display: none; } }
+
+#overlay { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding-inline: 16px; background: rgba(5, 8, 15, 0.45); }
+#overlay[hidden] { display: none !important; }
+.card { width: 100%; max-width: 360px; background: var(--panel); border: 1px solid var(--line); border-radius: 18px; padding: 24px; display: grid; gap: 14px; backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); cursor: default; }
+.card h1 { margin: 0; font-family: var(--font-display); font-weight: 800; font-size: 30px; letter-spacing: -0.01em; text-wrap: balance; }
+.card p { margin: 0; font-size: 14px; line-height: 1.5; color: var(--ink-dim); }
+.card label { font-size: 12px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-dim); display: grid; gap: 6px; }
+.card input { font: 500 16px var(--font-body); color: var(--ink); background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line); border-radius: 10px; padding: 11px 12px; min-width: 0; }
+.card input::placeholder { color: #66738f; }
+.card button { font: 700 15px var(--font-body); color: var(--accent-ink); background: var(--accent); border: 0; border-radius: 10px; padding: 13px 16px; cursor: pointer; }
+.card input:focus-visible, .card button:focus-visible, #boost:focus-visible { outline: 3px solid var(--ink); outline-offset: 2px; }
+.rules { display: grid; gap: 4px; font-size: 13px; color: var(--ink-dim); }
+.rules b { color: var(--ink); font-weight: 500; }
+</style>
+
+</head>
+<body>
+<div id="wrap">
+  <canvas id="game"></canvas>
+
+  <div class="hud" id="scorebox" hidden>
+    <div class="eyebrow">Length</div>
+    <div id="score">0</div>
+    <div id="rank"></div>
+  </div>
+  <div class="hud" id="boardbox">
+    <div class="eyebrow">Longest now</div>
+    <ol id="board"></ol>
+  </div>
+  <canvas class="hud" id="mini" width="184" height="184"></canvas>
+  <div class="hud" id="hint">Mouse steers. Hold click or Space to boost.</div>
+  <button id="boost" type="button" aria-label="Boost">BOOST</button>
+
+  <div id="overlay">
+    <form class="card" id="card">
+      <h1 id="cardTitle">Coilfield</h1>
+      <p id="cardText">A prototype snake arena. Eat glowing orbs to grow, and cut rivals off so they run into you.</p>
+      <div class="rules">
+        <span><b>Steer</b> toward the pointer</span>
+        <span><b>Boost</b> with click, Space or the button (costs length)</span>
+        <span><b>Pop</b> if you touch another snake's body or the red edge</span>
+      </div>
+      <label for="nick">Nickname
+        <input id="nick" type="text" maxlength="14" placeholder="Optional" autocomplete="off">
+      </label>
+      <button id="go" type="submit">Enter the field</button>
+    </form>
+  </div>
+</div>
+
+<script>
+(function () {
+  "use strict";
+  var TAU = Math.PI * 2, WORLD_R = 2200, FOOD_TARGET = 850, FOOD_MAX = 1600, BOT_COUNT = 12, STEP = 1000 / 60;
+  var rnd = function (a, b) { return a + Math.random() * (b - a); };
+  var clamp = function (v, a, b) { return Math.max(a, Math.min(b, v)); };
+  var angDiff = function (a, b) { var d = a - b; while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU; return d; };
+
+  var css = getComputedStyle(document.documentElement);
+  var C = {
+    ground: css.getPropertyValue("--ground").trim(), arena: css.getPropertyValue("--arena").trim(),
+    dot: css.getPropertyValue("--dot").trim(), edge: css.getPropertyValue("--edge").trim(),
+    ink: css.getPropertyValue("--ink").trim(), accent: css.getPropertyValue("--accent").trim()
+  };
+
+  var wrap = document.getElementById("wrap"), canvas = document.getElementById("game"), ctx = canvas.getContext("2d");
+  var mini = document.getElementById("mini"), mctx = mini.getContext("2d");
+  var overlay = document.getElementById("overlay"), card = document.getElementById("card");
+  var cardTitle = document.getElementById("cardTitle"), cardText = document.getElementById("cardText"), goBtn = document.getElementById("go");
+  var nick = document.getElementById("nick"), scoreEl = document.getElementById("score"), rankEl = document.getElementById("rank");
+  var scoreBox = document.getElementById("scorebox"), boardEl = document.getElementById("board"), boostBtnEl = document.getElementById("boost");
+
+  var W = 800, H = 600, DPR = 1;
+  function resize() {
+    var r = wrap.getBoundingClientRect();
+    W = Math.max(1, r.width); H = Math.max(1, r.height);
+    DPR = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+  }
+  resize();
+  if (window.ResizeObserver) new ResizeObserver(resize).observe(wrap); else window.addEventListener("resize", resize);
+
+  var BOT_NAMES = ["Mossy", "Pipkin", "Vex", "Orla", "Dune", "Quill", "Marlo", "Tansy", "Brisk", "Nova", "Kestrel", "Iggy", "Sable", "Wren"];
+  var food = [], snakes = [], bots = [], player = null, state = "menu", frame = 0, best = 0;
+  var focus = null, cam = { x: 0, y: 0, zoom: 1 };
+  var pointer = { x: 0, y: 0, active: false, down: false, type: "mouse" }, boostKey = false, boostBtn = false;
+
+  function spawnFood(x, y, val, hue, r) {
+    food.push({ x: x, y: y, val: val, r: r, col: "hsl(" + hue + ",90%,62%)", halo: "hsla(" + hue + ",90%,62%,0.2)" });
+  }
+  function randomFood() {
+    var a = rnd(0, TAU), d = Math.sqrt(Math.random()) * (WORLD_R - 30), v = rnd(0.12, 0.35);
+    spawnFood(Math.cos(a) * d, Math.sin(a) * d, v, rnd(0, 360), 3 + v * 9);
+  }
+  for (var i = 0; i < FOOD_TARGET; i++) randomFood();
+
+  function radiusOf(s) { return 7 + Math.min(12, (s.mass - 10) * 0.04); }
+  function makeSnake(name, isPlayer, mass) {
+    var a = rnd(0, TAU), d = Math.sqrt(Math.random()) * (isPlayer ? 500 : WORLD_R - 600), hue = rnd(0, 360);
+    var s = { name: name, isPlayer: isPlayer, mass: mass, hue: hue, x: Math.cos(a) * d, y: Math.sin(a) * d, angle: rnd(0, TAU), target: 0,
+      segs: [], boost: false, boosting: false, tick: 0, alive: true, wt: 0, wtTimer: 0, foodTimer: 0, hasFood: false, fx: 0, fy: 0, prey: null, respawnAt: 0, r: 0, sp: 0 };
+    s.target = s.angle; s.c1 = "hsl(" + hue + ",80%,58%)"; s.c2 = "hsl(" + hue + ",80%,45%)";
+    s.r = radiusOf(s); s.sp = s.r * 0.75;
+    var n = Math.floor(s.mass);
+    for (var k = 0; k < n; k++) s.segs.push({ x: s.x - Math.cos(s.angle) * k * s.sp, y: s.y - Math.sin(s.angle) * k * s.sp });
+    return s;
+  }
+  function makeBot(i) { var b = makeSnake(BOT_NAMES[i % BOT_NAMES.length], false, rnd(10, 45)); b.slot = i; b.aggr = Math.random() < 0.4; return b; }
+  for (var b = 0; b < BOT_COUNT; b++) { var bot = makeBot(b); bots.push(bot); snakes.push(bot); }
+  focus = bots[0];
+
+  function move(s) {
+    var diff = angDiff(s.target, s.angle), maxTurn = Math.max(0.035, 0.08 - (s.mass - 10) * 0.0004);
+    s.angle += clamp(diff, -maxTurn, maxTurn);
+    s.boosting = s.boost && s.mass > 12;
+    var speed = s.boosting ? 5.4 : 3.3;
+    s.x += Math.cos(s.angle) * speed; s.y += Math.sin(s.angle) * speed;
+    s.r = radiusOf(s); s.sp = s.r * 0.75;
+    if (s.boosting) {
+      s.tick++;
+      if (s.tick % 7 === 0) { s.mass -= 0.3; var t = s.segs[s.segs.length - 1]; spawnFood(t.x + rnd(-4, 4), t.y + rnd(-4, 4), 0.25, s.hue, 5); }
+    }
+    var n = Math.floor(s.mass);
+    while (s.segs.length < n) { var tl = s.segs[s.segs.length - 1]; s.segs.push({ x: tl.x, y: tl.y }); }
+    while (s.segs.length > n && s.segs.length > 3) s.segs.pop();
+    s.segs[0].x = s.x; s.segs[0].y = s.y;
+    for (var i = 1; i < s.segs.length; i++) {
+      var p = s.segs[i - 1], q = s.segs[i], dx = p.x - q.x, dy = p.y - q.y, d = Math.sqrt(dx * dx + dy * dy);
+      if (d > s.sp) { var k = (d - s.sp) / d; q.x += dx * k; q.y += dy * k; }
+    }
+  }
+
+  function eat(s) {
+    var reachPull = (s.r + 50) * (s.r + 50);
+    for (var i = food.length - 1; i >= 0; i--) {
+      var f = food[i], dx = s.x - f.x, dy = s.y - f.y, d2 = dx * dx + dy * dy, reach = s.r + f.r + 4;
+      if (d2 < reach * reach) { s.mass += f.val; food[i] = food[food.length - 1]; food.pop(); }
+      else if (d2 < reachPull) { f.x += dx * 0.12; f.y += dy * 0.12; }
+    }
+  }
+
+  function hits(s) {
+    if (Math.hypot(s.x, s.y) > WORLD_R - s.r) return true;
+    for (var a = 0; a < snakes.length; a++) {
+      var o = snakes[a];
+      if (o === s || !o.alive) continue;
+      var hx = o.x - s.x, hy = o.y - s.y, reach = o.segs.length * o.sp + s.r + o.r;
+      if (hx * hx + hy * hy > reach * reach) continue;
+      var lim = s.r + o.r * 0.85, lim2 = lim * lim;
+      for (var j = 1; j < o.segs.length; j++) {
+        var p = o.segs[j], dx = p.x - s.x, dy = p.y - s.y;
+        if (dx * dx + dy * dy < lim2) return true;
+      }
+    }
+    return false;
+  }
+
+  function kill(s) {
+    s.alive = false;
+    var step = 2, count = Math.ceil(s.segs.length / step), val = Math.max(0.3, (s.mass * 0.7) / count);
+    for (var i = 0; i < s.segs.length; i += step) spawnFood(s.segs[i].x + rnd(-6, 6), s.segs[i].y + rnd(-6, 6), val, s.hue, clamp(4 + val * 4, 4, 10));
+    if (food.length > FOOD_MAX) food.splice(0, food.length - FOOD_MAX);
+    if (s.isPlayer) endRun(); else s.respawnAt = frame + 120;
+  }
+
+  function think(s) {
+    s.boost = false;
+    var dist = Math.hypot(s.x, s.y);
+    if (dist > WORLD_R - 380) { s.target = Math.atan2(-s.y, -s.x); return; }
+    var look = s.r * 2 + 55, fx = s.x + Math.cos(s.angle) * look, fy = s.y + Math.sin(s.angle) * look;
+    for (var a = 0; a < snakes.length; a++) {
+      var o = snakes[a];
+      if (o === s || !o.alive) continue;
+      var hx = o.x - s.x, hy = o.y - s.y, reach = o.segs.length * o.sp + look + 60;
+      if (hx * hx + hy * hy > reach * reach) continue;
+      var lim = s.r + o.r + 16, lim2 = lim * lim;
+      for (var j = 0; j < o.segs.length; j++) {
+        var p = o.segs[j], dx = p.x - fx, dy = p.y - fy;
+        if (dx * dx + dy * dy < lim2) {
+          var cross = Math.cos(s.angle) * (p.y - s.y) - Math.sin(s.angle) * (p.x - s.x);
+          s.target = s.angle + (cross > 0 ? -1.4 : 1.4);
+          return;
+        }
+      }
+    }
+    if (--s.foodTimer <= 0) {
+      s.foodTimer = 12;
+      var best = null, bd = 320 * 320;
+      for (var i = 0; i < food.length; i++) { var f = food[i], ex = f.x - s.x, ey = f.y - s.y, d = ex * ex + ey * ey; if (d < bd) { bd = d; best = f; } }
+      s.hasFood = !!best; if (best) { s.fx = best.x; s.fy = best.y; }
+      s.prey = null;
+      if (s.aggr && s.mass > 25) {
+        var pd = 260 * 260;
+        for (var c = 0; c < snakes.length; c++) {
+          var q = snakes[c];
+          if (q === s || !q.alive || q.mass > s.mass * 0.8) continue;
+          var qx = q.x - s.x, qy = q.y - s.y, qd = qx * qx + qy * qy;
+          if (qd < pd) { pd = qd; s.prey = q; }
+        }
+      }
+    }
+    if (s.prey && s.prey.alive) {
+      s.target = Math.atan2(s.prey.y + Math.sin(s.prey.angle) * 110 - s.y, s.prey.x + Math.cos(s.prey.angle) * 110 - s.x);
+      s.boost = s.mass > 30;
+    } else if (s.hasFood) {
+      s.target = Math.atan2(s.fy - s.y, s.fx - s.x);
+    } else {
+      if (--s.wtTimer <= 0) { s.wtTimer = Math.floor(rnd(50, 150)); s.wt = s.angle + rnd(-1.2, 1.2); }
+      s.target = s.wt;
+    }
+  }
+
+  function update() {
+    frame++;
+    if (state === "play" && player && player.alive) {
+      if (pointer.active) { var dx = pointer.x - W / 2, dy = pointer.y - H / 2; if (dx * dx + dy * dy > 64) player.target = Math.atan2(dy, dx); }
+      player.boost = boostKey || boostBtn || (pointer.down && pointer.type === "mouse");
+    }
+    var i, s;
+    for (i = 0; i < snakes.length; i++) { s = snakes[i]; if (s.alive && !s.isPlayer) think(s); }
+    for (i = 0; i < snakes.length; i++) { s = snakes[i]; if (s.alive) { move(s); eat(s); } }
+    var dead = [];
+    for (i = 0; i < snakes.length; i++) { s = snakes[i]; if (s.alive && hits(s)) dead.push(s); }
+    for (i = 0; i < dead.length; i++) kill(dead[i]);
+    for (i = 0; i < bots.length; i++) {
+      if (!bots[i].alive && frame >= bots[i].respawnAt) {
+        var nb = makeBot(bots[i].slot), at = snakes.indexOf(bots[i]);
+        bots[i] = nb; snakes[at] = nb;
+      }
+    }
+    for (i = 0; i < 6 && food.length < FOOD_TARGET; i++) randomFood();
+  }
+
+  function endRun() {
+    state = "dead";
+    var sc = Math.floor(player.mass * 10);
+    best = Math.max(best, sc);
+    cardTitle.textContent = "Popped";
+    cardText.textContent = "You reached length " + sc + ". Best this session: " + best + ".";
+    goBtn.textContent = "Play again";
+    scoreBox.hidden = true;
+    setTimeout(function () { if (state === "dead") { overlay.hidden = false; goBtn.focus(); } }, 700);
+  }
+  card.addEventListener("submit", function (e) {
+    e.preventDefault();
+    var name = (nick.value || "").trim().slice(0, 14) || "You";
+    var at = snakes.indexOf(player);
+    if (at >= 0) snakes.splice(at, 1);
+    player = makeSnake(name, true, 10);
+    snakes.push(player);
+    state = "play"; overlay.hidden = true; scoreBox.hidden = false;
+    cam.x = player.x; cam.y = player.y;
+  });
+
+  function pos(e) { var r = wrap.getBoundingClientRect(); pointer.x = e.clientX - r.left; pointer.y = e.clientY - r.top; pointer.type = e.pointerType || "mouse"; pointer.active = true; }
+  wrap.addEventListener("pointermove", pos);
+  wrap.addEventListener("pointerdown", function (e) { pos(e); pointer.down = true; });
+  window.addEventListener("pointerup", function () { pointer.down = false; });
+  window.addEventListener("pointercancel", function () { pointer.down = false; });
+  boostBtnEl.addEventListener("pointerdown", function (e) { e.stopPropagation(); boostBtn = true; try { boostBtnEl.setPointerCapture(e.pointerId); } catch (x) {} });
+  boostBtnEl.addEventListener("pointermove", function (e) { e.stopPropagation(); });
+  ["pointerup", "pointercancel", "lostpointercapture"].forEach(function (n) { boostBtnEl.addEventListener(n, function (e) { e.stopPropagation(); boostBtn = false; }); });
+  window.addEventListener("keydown", function (e) {
+    if (e.code === "Space" && e.target.tagName !== "INPUT" && e.target.tagName !== "BUTTON") { boostKey = true; e.preventDefault(); }
+  });
+  window.addEventListener("keyup", function (e) { if (e.code === "Space") boostKey = false; });
+
+  function render() {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    ctx.fillStyle = C.ground; ctx.fillRect(0, 0, W, H);
+    var z = cam.zoom, vx0 = cam.x - W / (2 * z), vx1 = cam.x + W / (2 * z), vy0 = cam.y - H / (2 * z), vy1 = cam.y + H / (2 * z);
+    ctx.translate(W / 2, H / 2); ctx.scale(z, z); ctx.translate(-cam.x, -cam.y);
+
+    ctx.fillStyle = C.arena; ctx.beginPath(); ctx.arc(0, 0, WORLD_R, 0, TAU); ctx.fill();
+    ctx.fillStyle = C.dot;
+    var g = 70;
+    for (var gx = Math.floor(vx0 / g) * g; gx < vx1; gx += g) {
+      for (var gy = Math.floor(vy0 / g) * g; gy < vy1; gy += g) {
+        if (gx * gx + gy * gy < WORLD_R * WORLD_R) ctx.fillRect(gx - 1.5, gy - 1.5, 3, 3);
+      }
+    }
+    ctx.strokeStyle = C.edge; ctx.lineWidth = 14; ctx.globalAlpha = 0.9;
+    ctx.beginPath(); ctx.arc(0, 0, WORLD_R + 7, 0, TAU); ctx.stroke(); ctx.globalAlpha = 1;
+
+    var i, f;
+    for (i = 0; i < food.length; i++) {
+      f = food[i];
+      if (f.x < vx0 - 20 || f.x > vx1 + 20 || f.y < vy0 - 20 || f.y > vy1 + 20) continue;
+      ctx.fillStyle = f.halo; ctx.beginPath(); ctx.arc(f.x, f.y, f.r * 2.2, 0, TAU); ctx.fill();
+      ctx.fillStyle = f.col; ctx.beginPath(); ctx.arc(f.x, f.y, f.r, 0, TAU); ctx.fill();
+    }
+
+    var order = snakes.filter(function (s) { return s.alive; }).sort(function (a, b) { return a.mass - b.mass; });
+    for (i = 0; i < order.length; i++) drawSnake(order[i], vx0, vx1, vy0, vy1);
+    ctx.textAlign = "center"; ctx.font = "500 " + (13 / z) + "px 'DM Sans', system-ui, sans-serif";
+    for (i = 0; i < order.length; i++) {
+      var s = order[i];
+      if (s.x < vx0 || s.x > vx1 || s.y < vy0 || s.y > vy1) continue;
+      ctx.fillStyle = s.isPlayer ? C.accent : C.ink; ctx.globalAlpha = 0.85;
+      ctx.fillText(s.name, s.x, s.y - s.r - 10 / z); ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawSnake(s, vx0, vx1, vy0, vy1) {
+    var segs = s.segs, r = s.r, i, p, pad = r + 30;
+    if (s.boosting) {
+      ctx.globalAlpha = 0.16; ctx.fillStyle = s.c1;
+      for (i = segs.length - 1; i >= 0; i -= 2) { p = segs[i]; ctx.beginPath(); ctx.arc(p.x, p.y, r * 1.7, 0, TAU); ctx.fill(); }
+      ctx.globalAlpha = 1;
+    }
+    for (i = segs.length - 1; i >= 0; i--) {
+      p = segs[i];
+      if (p.x < vx0 - pad || p.x > vx1 + pad || p.y < vy0 - pad || p.y > vy1 + pad) continue;
+      ctx.fillStyle = i % 2 ? s.c1 : s.c2;
+      ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, TAU); ctx.fill();
+    }
+    var ex = Math.cos(s.angle), ey = Math.sin(s.angle), px = -ey, py = ex;
+    for (var side = -1; side <= 1; side += 2) {
+      var cx = s.x + ex * r * 0.35 + px * r * 0.5 * side, cy = s.y + ey * r * 0.35 + py * r * 0.5 * side;
+      ctx.fillStyle = "#ffffff"; ctx.beginPath(); ctx.arc(cx, cy, r * 0.38, 0, TAU); ctx.fill();
+      ctx.fillStyle = "#0b1020"; ctx.beginPath(); ctx.arc(cx + ex * r * 0.12, cy + ey * r * 0.12, r * 0.2, 0, TAU); ctx.fill();
+    }
+  }
+
+  function renderMini() {
+    var S = mini.width, R = S / 2 - 3, k = R / WORLD_R;
+    mctx.clearRect(0, 0, S, S);
+    mctx.strokeStyle = C.edge; mctx.globalAlpha = 0.7; mctx.lineWidth = 2;
+    mctx.beginPath(); mctx.arc(S / 2, S / 2, R, 0, TAU); mctx.stroke(); mctx.globalAlpha = 1;
+    for (var i = 0; i < snakes.length; i++) {
+      var s = snakes[i]; if (!s.alive) continue;
+      mctx.fillStyle = s.isPlayer ? C.accent : s.c1;
+      mctx.beginPath(); mctx.arc(S / 2 + s.x * k, S / 2 + s.y * k, s.isPlayer ? 5 : 3, 0, TAU); mctx.fill();
+    }
+  }
+
+  function updateHud() {
+    var alive = snakes.filter(function (s) { return s.alive; }).sort(function (a, b) { return b.mass - a.mass; });
+    boardEl.textContent = "";
+    alive.slice(0, 5).forEach(function (s) {
+      var li = document.createElement("li"), n = document.createElement("span"), v = document.createElement("span");
+      n.textContent = s.name; v.textContent = Math.floor(s.mass * 10);
+      if (s.isPlayer) li.className = "me";
+      li.appendChild(n); li.appendChild(v); boardEl.appendChild(li);
+    });
+    if (state === "play" && player && player.alive) {
+      scoreEl.textContent = Math.floor(player.mass * 10);
+      rankEl.textContent = "Rank " + (alive.indexOf(player) + 1) + " of " + alive.length;
+    }
+  }
+
+  function camera() {
+    var t = null;
+    if (state === "play" && player && player.alive) t = player;
+    else if (state === "menu") { if (!focus || !focus.alive) focus = bots.filter(function (b) { return b.alive; })[0] || null; t = focus; }
+    var mass = t ? t.mass : 10;
+    var zt = clamp(1 / (1 + (mass - 10) * 0.004), 0.55, 1) * (W < 600 ? 0.8 : 1);
+    if (t) { cam.x += (t.x - cam.x) * 0.12; cam.y += (t.y - cam.y) * 0.12; }
+    cam.zoom += (zt - cam.zoom) * 0.03;
+  }
+
+  var last = performance.now(), acc = 0;
+  function loop(t) {
+    acc += Math.min(100, t - last); last = t;
+    while (acc >= STEP) { update(); camera(); acc -= STEP; }
+    render();
+    if (frame % 3 === 0) renderMini();
+    if (frame % 6 === 0) updateHud();
+    requestAnimationFrame(loop);
+  }
+  requestAnimationFrame(loop);
+})();
+</script>
+
+</body>
+</html>
